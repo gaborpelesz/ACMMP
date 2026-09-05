@@ -1,4 +1,5 @@
 #include "ACMMP.h"
+#include "bench_timer.h"
 
 #define mul4(v,k) { \
     v->x = v->x * k; \
@@ -1330,28 +1331,40 @@ void ACMMP::RunPatchMatch()
 
     int max_iterations = params.max_iterations;
 
-    RandomInitialization<<<grid_size_randinit, block_size_randinit>>>(texture_objects_cuda, cameras_cuda, plane_hypotheses_cuda, scaled_plane_hypotheses_cuda, costs_cuda, pre_costs_cuda, rand_states_cuda, selected_views_cuda, prior_planes_cuda, plane_masks_cuda, params);
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    {
+        BENCH_PHASE("patchmatch.init");
+        RandomInitialization<<<grid_size_randinit, block_size_randinit>>>(texture_objects_cuda, cameras_cuda, plane_hypotheses_cuda, scaled_plane_hypotheses_cuda, costs_cuda, pre_costs_cuda, rand_states_cuda, selected_views_cuda, prior_planes_cuda, plane_masks_cuda, params);
+        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    }
 
     for (int i = 0; i < max_iterations; ++i) {
-        BlackPixelUpdate<<<grid_size_checkerboard, block_size_checkerboard>>>(texture_objects_cuda, texture_depths_cuda, cameras_cuda, plane_hypotheses_cuda, costs_cuda, pre_costs_cuda, rand_states_cuda, selected_views_cuda, prior_planes_cuda, plane_masks_cuda, params, i);
-        CUDA_SAFE_CALL(cudaDeviceSynchronize());
-        RedPixelUpdate<<<grid_size_checkerboard, block_size_checkerboard>>>(texture_objects_cuda, texture_depths_cuda, cameras_cuda, plane_hypotheses_cuda, costs_cuda, pre_costs_cuda,rand_states_cuda, selected_views_cuda, prior_planes_cuda, plane_masks_cuda, params, i);
-        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+        {
+            BENCH_PHASE("patchmatch.propagate", "iter=%d", i);
+            BlackPixelUpdate<<<grid_size_checkerboard, block_size_checkerboard>>>(texture_objects_cuda, texture_depths_cuda, cameras_cuda, plane_hypotheses_cuda, costs_cuda, pre_costs_cuda, rand_states_cuda, selected_views_cuda, prior_planes_cuda, plane_masks_cuda, params, i);
+            CUDA_SAFE_CALL(cudaDeviceSynchronize());
+            RedPixelUpdate<<<grid_size_checkerboard, block_size_checkerboard>>>(texture_objects_cuda, texture_depths_cuda, cameras_cuda, plane_hypotheses_cuda, costs_cuda, pre_costs_cuda,rand_states_cuda, selected_views_cuda, prior_planes_cuda, plane_masks_cuda, params, i);
+            CUDA_SAFE_CALL(cudaDeviceSynchronize());
+        }
         printf("iteration: %d\n", i);
     }
 
-    GetDepthandNormal<<<grid_size_randinit, block_size_randinit>>>(cameras_cuda, plane_hypotheses_cuda, params);
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    {
+        BENCH_PHASE("patchmatch.finalize");
+        GetDepthandNormal<<<grid_size_randinit, block_size_randinit>>>(cameras_cuda, plane_hypotheses_cuda, params);
+        CUDA_SAFE_CALL(cudaDeviceSynchronize());
 
-    BlackPixelFilter<<<grid_size_checkerboard, block_size_checkerboard>>>(cameras_cuda, plane_hypotheses_cuda, costs_cuda);
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
-    RedPixelFilter<<<grid_size_checkerboard, block_size_checkerboard>>>(cameras_cuda, plane_hypotheses_cuda, costs_cuda);
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+        BlackPixelFilter<<<grid_size_checkerboard, block_size_checkerboard>>>(cameras_cuda, plane_hypotheses_cuda, costs_cuda);
+        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+        RedPixelFilter<<<grid_size_checkerboard, block_size_checkerboard>>>(cameras_cuda, plane_hypotheses_cuda, costs_cuda);
+        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    }
 
-    cudaMemcpy(plane_hypotheses_host, plane_hypotheses_cuda, sizeof(float4) * width * height, cudaMemcpyDeviceToHost);
-    cudaMemcpy(costs_host, costs_cuda, sizeof(float) * width * height, cudaMemcpyDeviceToHost);
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    {
+        BENCH_PHASE("patchmatch.readback");
+        cudaMemcpy(plane_hypotheses_host, plane_hypotheses_cuda, sizeof(float4) * width * height, cudaMemcpyDeviceToHost);
+        cudaMemcpy(costs_host, costs_cuda, sizeof(float) * width * height, cudaMemcpyDeviceToHost);
+        CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    }
 }
 
 __global__ void JBU_cu(JBUParameters *jp, JBUTexObj *jt, float *depth)
