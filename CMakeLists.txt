@@ -1,7 +1,6 @@
 cmake_minimum_required (VERSION 2.8)
 project (ACMMP)
 
-set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda-8.0")
 find_package(CUDA 6.0 REQUIRED ) # For Cuda Managed Memory and c++11
 find_package(OpenCV REQUIRED )
 
